@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LinkMind Desktop",
+  "version": "0.1.2",
+  "identifier": "com.knowlege.weknora.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "LinkMind Desktop",
+        "width": 1240,
+        "height": 820,
+        "minWidth": 980,
+        "minHeight": 640,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "windows": {
+      "nsis": {
+        "installerHooks": "./installer-hooks.nsh"
+      }
+    },
+    "icon": ["icons/icon.ico"],
+    "resources": {
+      "../runtime/linkmind-lite.exe": "binaries/linkmind-lite.exe",
+      "../runtime/web/": "binaries/web/",
+      "../runtime/config/": "binaries/config/",
+      "../runtime/migrations/": "binaries/migrations/",
+      "../runtime/browserskill/": "binaries/browserskill/",
+      "../runtime/dict/": "binaries/dict/",
+      "../runtime/docreader/": "binaries/docreader/"
+    }
+  }
+}

@@ -1,0 +1,38 @@
+[package]
+name = "weknora-desktop"
+version = "0.1.0"
+description = "WeKnora 本地知识库桌面壳 —— 管理 WeKnora Lite 服务并提供 React 控制台"
+authors = ["knowlege"]
+edition = "2021"
+
+[lib]
+name = "weknora_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+# 正式构建必须启用(前端资源嵌入 exe);`npm run tauri build` 会自动带上,
+# 裸 cargo build --release 需手动加 --features custom-protocol
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "2", features = ["json"] }
+getrandom = "0.3"
+parking_lot = "0.12"
+
+[profile.dev]
+# 本机环境下 PDB 写入易被安全软件/残留句柄锁死(LNK1201),关闭调试信息
+debug = 0
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
