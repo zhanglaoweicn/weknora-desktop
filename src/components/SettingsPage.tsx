@@ -36,6 +36,18 @@ export default function SettingsPage() {
     return out;
   };
 
+  // Fake-IP 兼容默认开启(内置环境变量 SSRF_ALLOW_FAKEIP=true),只有用户
+  // 在附加环境变量里显式写 false 才关闭。开关展示的就是这个覆盖项。
+  const fakeipEnabled =
+    (parseEnv(envText)["SSRF_ALLOW_FAKEIP"] ?? "true").trim().toLowerCase() !== "false";
+  const setFakeip = (on: boolean) => {
+    const entries = Object.entries(parseEnv(envText)).filter(
+      ([k]) => k !== "SSRF_ALLOW_FAKEIP",
+    );
+    if (!on) entries.push(["SSRF_ALLOW_FAKEIP", "false"]);
+    setEnvText(entries.map(([k, v]) => `${k}=${v}`).join("\n"));
+  };
+
   const save = async () => {
     if (!cfg) return;
     setSaving(true);
@@ -145,6 +157,19 @@ export default function SettingsPage() {
               本地向量/对话模型走此地址;也可在工作台中改用任意 OpenAI 兼容服务。
             </span>
           </label>
+          <label className="switch-row" style={{ marginTop: 8 }}>
+            <input
+              type="checkbox"
+              checked={fakeipEnabled}
+              onChange={(e) => setFakeip(e.target.checked)}
+            />
+            <span>VPN/代理兼容模式（推荐开启）</span>
+          </label>
+          <p className="field-hint">
+            开启后兼容 Clash / Verge 等代理软件的 Fake-IP
+            模式。此前保存云端模型报"198.18.x.x 被拦截"、解析网页报"URL blocked by SSRF
+            guard"都是这个原因；保持开启即可在开代理的情况下正常使用。
+          </p>
           <label className="field">
             附加环境变量(每行 KEY=VALUE,覆盖内置值)
             <textarea
@@ -152,8 +177,13 @@ export default function SettingsPage() {
               className="mono"
               value={envText}
               onChange={(e) => setEnvText(e.target.value)}
-              placeholder={"# OPENAI_API_KEY=sk-...\n# OPENAI_BASE_URL=https://api.openai.com/v1"}
+              placeholder={"# OPENAI_API_KEY=sk-...\n# OPENAI_BASE_URL=https://api.openai.com/v1\n# SSRF_WHITELIST_EXTRA=open.bigmodel.cn,*.example.com"}
             />
+            <span className="field-hint">
+              遇到"未通过安全校验 / SSRF validation
+              failed"时，可把对应域名加入 SSRF_WHITELIST_EXTRA（支持 *.example.com
+              通配，逗号分隔，对模型调用与网页解析同时生效）。
+            </span>
           </label>
         </section>
       </div>

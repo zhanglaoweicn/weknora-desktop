@@ -98,9 +98,40 @@ npm run tauri build    # 产出 NSIS 安装包(src-tauri/target/release/bundle/)
 
 - 配置存于 `%APPDATA%/com.knowlege.weknora.desktop/config.json`;首次启动自动生成 `SYSTEM_AES_KEY` / `JWT_SECRET`
 - Lite 进程环境由壳注入(`DB_DRIVER=sqlite`、`STREAM_MANAGER_TYPE=memory`、`SERVER_PORT`、`DOCREADER_ADDR` 等),`extra_env` 可覆盖任意变量
-- 服务启动时自动拉起 docreader 解析服务(设置可关;目录自动取部署目录内 `docreader/`,或设置中显式指定),并注入 `DOCREADER_ADDR=127.0.0.1:50051`
+- 服务启动时自动拉起 docreader 解析服务(设置可关;目录自动取部署目录内 `docreader/`,或设置中显式指定),并注入 `DOCREADER_ADDR=127.0.0.1:50051`;SSRF 白名单口径(`SSRF_WHITELIST` / `SSRF_WHITELIST_EXTRA` / `SSRF_ALLOW_FAKEIP` / `SSRF_DNS_WHITELIST_ONLY`)同步注入 docreader,模型调用与网页解析行为一致
 - 服务进程随应用退出而终止(可在设置中改为后台常驻)
 - 健康检查:`GET /health`,启动窗口 180s,超时判定 Failed;运行中周期刷新延迟
+- 壳读取子进程 stdout/stderr 的线程遇读错误不会放弃管道(提示一次后每秒重试),后端也不会因管道断裂刷屏(日志自动改经 stderr 输出)
+- 默认注入 `SSRF_ALLOW_FAKEIP=true`(VPN/代理兼容模式,设置页可关):放行 198.18.0.0/15 假 IP 网段,详见下文常见问题
+
+## 常见问题(可直接发给客户)
+
+**1. 保存云端模型提示"Base URL 未通过安全校验 / SSRF validation failed … 198.18.x.x"，解析网页提示"URL blocked by SSRF guard"？**
+
+原因：电脑上开着 Clash / Verge / Surge 等代理软件的 **Fake-IP 模式**（系统代理或 TUN）。这类代理会把本机所有域名解析成 198.18.x.x 假地址，旧版本的安全防护把它当成内网地址拦截。
+
+处理：**新版已默认兼容（设置 → "VPN/代理兼容模式"保持开启即可），无需任何操作。** 若使用的是旧版本，退出代理软件后重试；或在 设置 → 附加环境变量 中添加一行 `SSRF_ALLOW_FAKEIP=true` 后重启服务。
+
+**2. 服务日志刷屏 "Failed to write to log, write /dev/stdout: The pipe is being closed"？**
+
+原因：桌面壳读取后端日志的管道被外部干扰（安全软件、系统休眠等）后，旧版壳会放弃管道，后端每写一行日志都报一次错。
+
+处理：**重启应用即可恢复。** 新版已双向加固：壳不再放弃管道，后端日志也会自动改经 stderr 输出，不再刷屏、不丢日志。
+
+**3. 某个特定网站/模型接口就是被拦（报 SSRF validation failed，但没有 198.18 字样）？**
+
+在 设置 → 附加环境变量 中添加一行（逗号分隔，支持 `*.` 通配）：
+
+```
+SSRF_WHITELIST_EXTRA=open.bigmodel.cn,*.example.com
+```
+
+保存并重启服务后生效，对模型调用与网页解析同时生效。
+
+**4. 服务日志里大量 `path=/health` 的访问日志？**
+
+新版已不再记录探活请求；旧版本属正常现象（桌面壳每秒探测一次服务健康），可忽略。
+
 
 ## API 速览
 

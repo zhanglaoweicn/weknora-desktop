@@ -189,21 +189,45 @@ impl ServiceState {
     }
 }
 
-/// 读取子进程输出流并推送日志事件
+/// 读取子进程输出流并推送日志事件。
+///
+/// 读错误(如外部安全软件短暂干扰管道)绝不丢弃读取端：读取端一旦被关闭,
+/// 子进程之后每次写 stdout/stderr 都得到 EPIPE——lite 的 logrus 会因此向
+/// stderr 持续打印 "Failed to write to log, write /dev/stdout: The pipe is
+/// being closed.",把服务日志面板刷满。这里改为提示一次后每秒重试,保持
+/// 管道存活;子进程真正退出时读到 EOF 自然结束。
 fn pump<R: std::io::Read + Send + 'static>(
     app: AppHandle,
     stream_name: &'static str,
     reader: R,
 ) {
     std::thread::spawn(move || {
-        let reader = BufReader::new(reader);
-        for line in reader.lines() {
-            match line {
-                Ok(l) => {
-                    let entry = app.state::<ServiceState>().push_log(stream_name, l);
+        let mut reader = BufReader::new(reader);
+        let mut warned = false;
+        loop {
+            let mut raw: Vec<u8> = Vec::new();
+            match reader.read_until(b'\n', &mut raw) {
+                Ok(0) => break, // EOF: 子进程关闭了它的写端(通常是退出)
+                Ok(_) => {
+                    warned = false;
+                    let line = String::from_utf8_lossy(&raw);
+                    let entry = app.state::<ServiceState>().push_log(
+                        stream_name,
+                        line.trim_end_matches(['\r', '\n']).to_string(),
+                    );
                     let _ = app.emit(LOG_EVENT, &entry);
                 }
-                Err(_) => break,
+                Err(e) => {
+                    if !warned {
+                        warned = true;
+                        let entry = app.state::<ServiceState>().push_log(
+                            "sys",
+                            format!("{stream_name} 日志管道读取中断({e}),已保持管道并将自动重试"),
+                        );
+                        let _ = app.emit(LOG_EVENT, &entry);
+                    }
+                    std::thread::sleep(Duration::from_secs(1));
+                }
             }
         }
     });
@@ -378,10 +402,39 @@ fn build_env(cfg: &Config, deploy_dir: &PathBuf) -> BTreeMap<String, String> {
             }
         }
     }
+    // 桌面单机默认放行 198.18.0.0/15(Fake-IP)网段:Clash/mihomo/Surge 类
+    // 代理的 Fake-IP 模式会把本机所有 DNS 解析答成该段,严格 SSRF 校验会让
+    // 开代理的用户保存任何云端模型、解析任何网页全部失败,且小白无从排查。
+    // 该段不可路由、无 SSRF 可触达的基础设施,localhost/内网/云元数据仍然
+    // 全部拦截。extra_env 同名变量仍可覆盖(设为 false 可恢复严格校验)。
+    // docreader 侧由 docreader_env 同步注入。
+    if !env.contains_key("SSRF_ALLOW_FAKEIP") {
+        env.insert("SSRF_ALLOW_FAKEIP".into(), "true".into());
+    }
     for (k, v) in &cfg.extra_env {
         env.insert(k.clone(), v.clone());
     }
     env
+}
+
+/// docreader(解析服务)需要与 Lite 一致的 SSRF 白名单口径:网页解析的 SSRF
+/// 守卫跑在 Python 里,只认这几个环境变量。历史版本没有注入,导致用户在
+/// 设置里配置的 SSRF_WHITELIST_EXTRA 对解析不生效(网页导入被拦而模型可用)。
+/// 只透传这几个变量,避免把 Lite 的 DB_PATH/SERVER_PORT 等环境带进 Python。
+fn docreader_env(cfg: &Config, deploy_dir: &PathBuf) -> BTreeMap<String, String> {
+    let full = build_env(cfg, deploy_dir);
+    let mut filtered = BTreeMap::new();
+    for key in [
+        "SSRF_WHITELIST",
+        "SSRF_WHITELIST_EXTRA",
+        "SSRF_ALLOW_FAKEIP",
+        "SSRF_DNS_WHITELIST_ONLY",
+    ] {
+        if let Some(v) = full.get(key) {
+            filtered.insert(key.to_string(), v.clone());
+        }
+    }
+    filtered
 }
 
 pub fn health_probe(base_url: &str) -> Result<u128, String> {
@@ -495,8 +548,12 @@ fn ensure_docreader(app: &AppHandle, deploy_dir: &PathBuf) {
         .env("LOG_LEVEL", cfg.log_level.clone())
         // 默认 /tmp/docreader 随盘符解析到 <盘>:\tmp;指到部署数据目录,
         // 免去对 U 盘根目录的写入
-        .env("DOCREADER_IMAGE_OUTPUT_DIR", image_tmp.display().to_string())
-        .stdout(Stdio::piped())
+        .env("DOCREADER_IMAGE_OUTPUT_DIR", image_tmp.display().to_string());
+    // SSRF 白名单口径与 Lite 保持一致(网页解析的守卫在 Python 里)
+    for (k, v) in docreader_env(&cfg, deploy_dir) {
+        cmd.env(k, v);
+    }
+    cmd.stdout(Stdio::piped())
         .stderr(Stdio::piped());
     #[cfg(windows)]
     {
