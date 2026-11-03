@@ -1,5 +1,6 @@
 mod config;
 mod service;
+mod update;
 
 use serde::Serialize;
 use tauri::{
@@ -201,9 +202,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let cfg = config::load(app.handle());
             app.manage(ServiceState::new(cfg));
+            app.manage(update::UpdateState {
+                pending: parking_lot::Mutex::new(None),
+            });
             build_tray(app.handle())?;
 
             // 预建隐藏的工作台窗口(规避 Windows 上运行时建窗的导航丢失/卡死缺陷)
@@ -248,7 +253,9 @@ pub fn run() {
             open_workbench,
             open_url,
             open_path,
-            reveal_data_dir
+            reveal_data_dir,
+            update::check_update,
+            update::install_update
         ])
         .on_window_event(|window, event| {
             // 工作台窗口点关闭 = 隐藏,窗口常驻复用

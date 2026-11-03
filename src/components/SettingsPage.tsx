@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, type AppConfig, type DeployInfo } from "../api";
+import { getVersion } from "@tauri-apps/api/app";
+import { api, events, type AppConfig, type DeployInfo, type UpdateMeta, type UpdateProgress } from "../api";
 
 export default function SettingsPage() {
   const [cfg, setCfg] = useState<AppConfig | null>(null);
@@ -7,6 +8,12 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [envText, setEnvText] = useState("");
+  const [appVersion, setAppVersion] = useState("");
+  const [update, setUpdate] = useState<UpdateMeta | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [progress, setProgress] = useState<UpdateProgress | null>(null);
 
   useEffect(() => {
     api.getConfig().then((c) => {
@@ -18,7 +25,42 @@ export default function SettingsPage() {
       );
     });
     api.deployInfo().then(setDeploy).catch(() => {});
+    getVersion().then(setAppVersion).catch(() => {});
+    const un = events.onUpdateProgress((p) => {
+      setProgress(p);
+      if (p.stage === "failed") {
+        setInstalling(false);
+        setMsg({ ok: false, text: "自动更新失败,请查看服务日志后重试,或到发布页手动下载。" });
+      }
+    });
+    return () => {
+      un.then((f) => f());
+    };
   }, []);
+
+  const checkUpdate = async () => {
+    setChecking(true);
+    setUpdateError(null);
+    setUpdate(null);
+    try {
+      setUpdate(await api.checkUpdate());
+    } catch (e) {
+      setUpdateError(String(e));
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const doInstall = async () => {
+    setInstalling(true);
+    setProgress({ stage: "downloading", downloaded: 0, total: null });
+    try {
+      await api.installUpdate();
+    } catch (e) {
+      setInstalling(false);
+      setUpdateError(String(e));
+    }
+  };
 
   if (!cfg) return <div className="page"><p className="muted">加载配置…</p></div>;
 
@@ -171,6 +213,18 @@ export default function SettingsPage() {
             guard"都是这个原因；保持开启即可在开代理的情况下正常使用。
           </p>
           <label className="field">
+            更新源地址(可选,留空使用默认发布源;须为 HTTPS 的 latest.json 完整地址)
+            <input
+              className="mono"
+              value={cfg.update_url ?? ""}
+              onChange={(e) => set({ update_url: e.target.value || null })}
+              placeholder="https://your-server.com/linkmind/latest.json"
+            />
+            <span className="field-hint">
+              客户访问 GitHub 缓慢时,可把它指向自建服务器/OSS 镜像,更新内容与官方发布一致。
+            </span>
+          </label>
+          <label className="field">
             附加环境变量(每行 KEY=VALUE,覆盖内置值)
             <textarea
               rows={5}
@@ -280,14 +334,68 @@ export default function SettingsPage() {
         </section>
       </div>
 
-      <div className="btn-row save-bar">
-        <button className="btn primary" disabled={saving} onClick={save}>
-          {saving ? "保存中…" : "保存设置"}
-        </button>
-        {msg && (
-          <span className={msg.ok ? "save-ok" : "form-error"}>{msg.text}</span>
-        )}
-      </div>
+        <section className="card">
+          <div className="card-title">软件更新</div>
+          <p className="muted" style={{ marginTop: 0 }}>
+            当前版本 {appVersion || "…"}
+            {update && !update.available && !update.portable && " — 已是最新"}
+          </p>
+          {update?.portable ? (
+            <p className="muted">
+              当前为 U 盘便携版,不支持在线更新。请获取新版便携包后,替换
+              LinkMindDesktop.exe 与 runtime\ 下的程序文件(runtime\data\
+              里的知识库数据不受影响)。
+            </p>
+          ) : (
+            <>
+              <div className="btn-row">
+                <button className="btn ghost" disabled={checking || installing} onClick={checkUpdate}>
+                  {checking ? "检查中…" : "检查更新"}
+                </button>
+                {update?.available && !installing && (
+                  <button className="btn primary" onClick={doInstall}>
+                    下载并安装 v{update.version}
+                  </button>
+                )}
+              </div>
+              {updateError && <p className="form-error">{updateError}</p>}
+              {installing && progress && (
+                <div>
+                  <p className="muted" style={{ margin: "8px 0 0" }}>
+                    {progress.stage === "downloading" && progress.total
+                      ? `下载中 ${Math.round((progress.downloaded / progress.total) * 100)}%(${(progress.downloaded / 1048576).toFixed(1)} / ${(progress.total / 1048576).toFixed(1)} MB),完成后应用会自动重启`
+                      : progress.stage === "downloading"
+                        ? `下载中 ${(progress.downloaded / 1048576).toFixed(1)} MB…`
+                        : progress.stage === "installing"
+                          ? "下载完成,正在安装(应用将自动重启)…"
+                          : "更新完成,即将重启应用…"}
+                  </p>
+                  {progress.stage === "downloading" && progress.total && (
+                    <progress
+                      className="update-progress"
+                      value={progress.downloaded}
+                      max={progress.total}
+                    />
+                  )}
+                </div>
+              )}
+              {!installing && (
+                <p className="field-hint">
+                  在线更新适用于安装版;下载约 200MB,期间请勿关闭应用。
+                </p>
+              )}
+            </>
+          )}
+        </section>
+
+        <div className="btn-row save-bar">
+          <button className="btn primary" disabled={saving} onClick={save}>
+            {saving ? "保存中…" : "保存设置"}
+          </button>
+          {msg && (
+            <span className={msg.ok ? "save-ok" : "form-error"}>{msg.text}</span>
+          )}
+        </div>
     </div>
   );
 }

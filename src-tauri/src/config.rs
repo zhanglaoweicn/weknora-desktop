@@ -43,6 +43,9 @@ pub struct Config {
     pub system_aes_key: Option<String>,
     /// JWT 签名密钥(自动生成)
     pub jwt_secret: Option<String>,
+    /// 自动更新源地址(latest.json 的 URL);为空使用内置默认(GitHub Releases)。
+    /// 客户访问 GitHub 困难时可指向自有服务器/OSS 镜像,须 HTTPS。
+    pub update_url: Option<String>,
     /// 配置结构版本;反序列化时缺失(旧版配置)则为 0
     #[serde(default)]
     pub config_rev: u32,
@@ -64,6 +67,7 @@ impl Default for Config {
             docreader_dir: None,
             system_aes_key: None,
             jwt_secret: None,
+            update_url: None,
             config_rev: CONFIG_REV,
         }
     }
@@ -86,6 +90,13 @@ impl Config {
         }
         if self.port == 0 {
             self.port = 8080;
+        }
+        if let Some(u) = &self.update_url {
+            if u.trim().is_empty() {
+                self.update_url = None;
+            } else {
+                self.update_url = Some(u.trim().to_string());
+            }
         }
     }
 }

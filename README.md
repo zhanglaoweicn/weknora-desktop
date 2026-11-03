@@ -104,6 +104,38 @@ npm run tauri build    # 产出 NSIS 安装包(src-tauri/target/release/bundle/)
 - 壳读取子进程 stdout/stderr 的线程遇读错误不会放弃管道(提示一次后每秒重试),后端也不会因管道断裂刷屏(日志自动改经 stderr 输出)
 - 默认注入 `SSRF_ALLOW_FAKEIP=true`(VPN/代理兼容模式,设置页可关):放行 198.18.0.0/15 假 IP 网段,详见下文常见问题
 
+## 发版与自动更新(安装版)
+
+安装版内置基于 tauri-plugin-updater 的在线更新:客户端启动时静默检查、设置页可手动检查,命中新版本后下载签名安装包并静默覆盖安装。U 盘便携版自动禁用(识别为便携布局),仍走手动替换文件。
+
+发版步骤:
+
+```bash
+# 1. 改版本号: src-tauri/tauri.conf.json 的 version
+
+# 2. 构建签名安装包(密钥在 updater-keys/,严禁提交仓库,丢失则老用户无法再在线更新)
+export TAURI_SIGNING_PRIVATE_KEY="$PWD/updater-keys/linkmind.key"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""   # 密钥生成时未设密码则为空
+npm run tauri build
+
+# 3. 生成 latest.json(自动收集安装包与 .sig 签名)
+bash scripts/make-update-manifest.sh 0.1.4 \
+  "https://github.com/zhanglaoweicn/weknora-desktop/releases/download/v0.1.4" \
+  "更新说明(会展示在客户端)"
+# 产物在 dist-update/: 安装包 + .sig + latest.json
+
+# 4. 发布: 把 dist-update/ 三个文件传到 GitHub Releases(或自有服务器)。
+#    客户端默认检查 GitHub Releases 的 latest/download/latest.json;
+#    客户访问 GitHub 慢时,在 应用设置 → 更新源地址 填自有镜像的
+#    latest.json 完整 HTTPS 地址即可,签名校验不受镜像影响。
+```
+
+要点:
+
+- `latest.json` 里的 `signature` 必须与安装包 `.sig` 内容一致、`url` 必须指向同一构建的安装包,否则客户端校验失败拒绝更新
+- 版本号必须高于客户端当前版本才会触发(semver 比较)
+- 安装包运行前会自动结束旧进程(installer-hooks.nsh),在线更新与手动覆盖安装共用这套清场逻辑
+
 ## 常见问题(可直接发给客户)
 
 **1. 保存云端模型提示"Base URL 未通过安全校验 / SSRF validation failed … 198.18.x.x"，解析网页提示"URL blocked by SSRF guard"？**

@@ -46,6 +46,7 @@ export interface AppConfig {
   extra_env: Record<string, string>;
   docreader_enabled: boolean;
   docreader_dir: string | null;
+  update_url: string | null;
 }
 
 export interface DeployInfo {
@@ -65,11 +66,28 @@ export interface HealthInfo {
   error: string | null;
 }
 
+export interface UpdateMeta {
+  available: boolean;
+  /** 便携布局:自动更新被禁用,提示手动替换文件 */
+  portable: boolean;
+  currentVersion: string;
+  version: string | null;
+  notes: string | null;
+  date: string | null;
+}
+
+export interface UpdateProgress {
+  stage: "downloading" | "installing" | "done" | "failed" | "restarting";
+  downloaded: number;
+  total: number | null;
+}
+
 export const api = {
   getConfig: () => call<AppConfig>("get_config", undefined, {
     host: "127.0.0.1", port: 8080, auto_start: true, keep_after_exit: false,
     lite_path: null, deploy_dir: null, ollama_base_url: "http://127.0.0.1:11434",
     log_level: "info", extra_env: {}, docreader_enabled: true, docreader_dir: null,
+    update_url: null,
   }),
   saveConfig: (cfg: AppConfig) => call<AppConfig>("save_config", { cfg }),
   getStatus: () => call<StatusInfo>("get_status", undefined, {
@@ -92,6 +110,11 @@ export const api = {
   openUrl: (url: string) => call<void>("open_url", { url }),
   openPath: (path: string) => call<void>("open_path", { path }),
   revealDataDir: () => call<void>("reveal_data_dir"),
+  checkUpdate: () => call<UpdateMeta>("check_update", undefined, {
+    available: false, portable: true, currentVersion: "-",
+    version: null, notes: null, date: null,
+  }),
+  installUpdate: () => call<void>("install_update"),
 };
 
 export const events = {
@@ -99,6 +122,8 @@ export const events = {
     listen<LogLine>("service://log", (e) => cb(e.payload)),
   onStatus: (cb: (info: StatusInfo) => void) =>
     listen<StatusInfo>("service://status", (e) => cb(e.payload)),
+  onUpdateProgress: (cb: (p: UpdateProgress) => void) =>
+    listen<UpdateProgress>("update://progress", (e) => cb(e.payload)),
 };
 
 export function fmtUptime(secs: number | null): string {

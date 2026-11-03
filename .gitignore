@@ -17,3 +17,7 @@ portable/
 *.log
 *.local
 .DS_Store
+
+# 更新签名私钥:丢失则无法再向老用户推送更新,务必备份,严禁提交
+updater-keys/
+dist-update/

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import brandIcon from "../icon-src.png";
-import { api, events, type StatusInfo } from "./api";
+import { api, events, type StatusInfo, type UpdateMeta } from "./api";
 import Dashboard from "./components/Dashboard";
 import Workbench from "./components/Workbench";
 import SettingsPage from "./components/SettingsPage";
@@ -17,6 +17,7 @@ export default function App() {
   const [page, setPage] = useState<Page>("dashboard");
   const [status, setStatus] = useState<StatusInfo | null>(null);
   const [previewMode, setPreviewMode] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateMeta | null>(null);
 
   useEffect(() => {
     api.getStatus().then(setStatus).catch(() => setPreviewMode(true));
@@ -24,6 +25,19 @@ export default function App() {
     return () => {
       un1.then((f) => f());
     };
+  }, []);
+
+  // 启动后静默检查一次更新;命中新版本时在内容区顶部提示。
+  // 检查失败(离线/网络受限)静默忽略,不打扰使用。
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      api.checkUpdate()
+        .then((m) => {
+          if (m.available) setUpdateInfo(m);
+        })
+        .catch(() => {});
+    }, 3000);
+    return () => clearTimeout(timer);
   }, []);
 
   const dot =
@@ -68,6 +82,19 @@ export default function App() {
       <main className="content">
         {previewMode && (
           <div className="banner">浏览器预览模式:服务控制功能需在 Tauri 应用内使用</div>
+        )}
+        {updateInfo?.available && (
+          <div className="banner">
+            发现新版本 v{updateInfo.version}(当前 v{updateInfo.currentVersion}),
+            前往{" "}
+            <button className="link-btn" onClick={() => setPage("settings")}>
+              设置 → 软件更新
+            </button>{" "}
+            一键安装。
+            <button className="banner-close" title="关闭" onClick={() => setUpdateInfo(null)}>
+              ✕
+            </button>
+          </div>
         )}
         {page === "dashboard" && <Dashboard status={status} onRefresh={() => api.getStatus().then(setStatus).catch(() => {})} />}
         {page === "workbench" && <Workbench status={status} />}
