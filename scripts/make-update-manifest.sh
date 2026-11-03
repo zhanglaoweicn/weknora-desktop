@@ -14,9 +14,9 @@
 # 产物: dist-update/latest.json 与 dist-update/ 内的安装包副本(含 .sig),
 #       把整个 dist-upload/ 目录内容上传到发布页/服务器即可。
 #
-# 注意: 上传到 GitHub Releases 时请把安装包文件名中的空格改为点号或横杠
-# (GitHub 会把空格规范化),URL 与文件名保持一致;本脚本用本地文件名
-# 生成 URL,空格会按 %20 编码,自建服务器可直接使用。
+# 注意: GitHub Releases 会把资产文件名中的空格规范成点号。为保证 URL
+# 在 GitHub 与自建服务器上都成立,本脚本统一把文件名中的空格替换为
+# 点号后再生成 URL 与本地副本(dist-update/ 内即上传内容,无需再改名)。
 set -euo pipefail
 
 VERSION="${1:?用法: make-update-manifest.sh <版本号> <下载基础URL> [更新说明]}"
@@ -33,15 +33,17 @@ INSTALLER=$(ls -t "$NSIS_DIR"/*-setup.exe 2>/dev/null | head -1 || true)
 SIG="$INSTALLER.sig"
 [ -f "$SIG" ] || { echo "错误: 未找到签名文件 $SIG。请确认构建时设置了 TAURI_SIGNING_PRIVATE_KEY 与 createUpdaterArtifacts"; exit 1; }
 
-FILENAME=$(basename "$INSTALLER")
-ENCODED_NAME=${FILENAME// /%20}
-DOWNLOAD_URL="${BASE_URL%/}/$ENCODED_NAME"
+# GitHub 规范: 资产文件名空格 → 点号;dist-update/ 内的副本按此命名,
+# latest.json 的 URL 与上传后的实际文件名保持一致
+ASSET_NAME=$(basename "$INSTALLER" | tr ' ' '.')
+ASSET_SIG_NAME="$ASSET_NAME.sig"
+DOWNLOAD_URL="${BASE_URL%/}/$ASSET_NAME"
 SIGNATURE=$(tr -d '\n\r' < "$SIG")
 PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 mkdir -p "$OUT_DIR"
-cp -f "$INSTALLER" "$OUT_DIR/"
-cp -f "$SIG" "$OUT_DIR/"
+cp -f "$INSTALLER" "$OUT_DIR/$ASSET_NAME"
+cp -f "$SIG" "$OUT_DIR/$ASSET_SIG_NAME"
 
 cat > "$OUT_DIR/latest.json" <<EOF
 {
@@ -60,5 +62,5 @@ EOF
 echo "==== latest.json 已生成 ===="
 cat "$OUT_DIR/latest.json"
 echo ""
-echo "上传清单: $OUT_DIR/ 内的 $FILENAME、$FILENAME.sig、latest.json"
+echo "上传清单: $OUT_DIR/ 内的 $ASSET_NAME、$ASSET_SIG_NAME、latest.json"
 echo "注意: latest.json 必须能通过 应用设置里的更新源地址(或 tauri.conf 内置端点) 访问到。"
